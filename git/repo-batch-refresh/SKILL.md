@@ -1,13 +1,14 @@
 ---
 name: repo-batch-refresh
-description: Batch-refresh a large set of local git repositories under a given root directory. Use when you need to fast-forward update many repos safely (without disrupting the current worktree), with concurrency via --batch and optional --debug output.
+version: "1.1.0"
+description: Batch-refresh a large set of local git repositories under a given root directory. Use when you need to fast-forward update many repos safely (without disrupting the current worktree), with concurrency via --batch and optional --debug output. Repos with a .ignore marker are reported as SKIP.
 ---
 
 # git-repo-batch-refresh
 
 This skill provides a local Rust-based CLI: `git-repo-batch-refresh`.
 
-Goal: **refresh many local git repositories under a root directory** by updating each repo’s default branch reference (best-effort detection via `origin/HEAD`, fallback to `main`).
+Goal: **refresh many local git repositories under a root directory** by updating each repo's default branch reference (best-effort detection via `origin/HEAD`, fallback to `main`).
 
 ## Usage
 
@@ -26,34 +27,56 @@ Flags:
 
 - `<ROOT_DIR>` (positional, required): directory to scan for git repos
 - `--batch <N>`: max parallel workers (default: 20)
-- `--debug`: print extra debug suffix per repo
+- `--debug`: print branch details per repo and expand NOK error blocks
 
 ## Output
+
+All output lines share a 4-character prefix aligned on the pipe separator (`" | "`).
 
 ### OK
 
 ```
- OK | <project-id>
+  OK | <project-id>
 ```
 
 ### NOK
 
+Without `--debug` (single line only):
+
 ```
-NOK | <project-id>
-    | ----------------------------------------
-    | <error messages>
-    | ----------------------------------------
+ NOK | <project-id>
+```
+
+With `--debug` (error block expanded):
+
+```
+ NOK | <project-id>
+     | ----------------------------------------
+     | <error messages>
+     | ----------------------------------------
+```
+
+### SKIP
+
+```
+SKIP | <project-id>
 ```
 
 `<project-id>` is derived from `git remote get-url origin` (token-safe parsing). If parsing fails, it falls back to a path relative to `<ROOT_DIR>`.
 
 ## Ignore rules
 
-- If a repo root contains `.ignore`: skip it
+- If a repo root contains `.ignore`: report it as `SKIP` and do not refresh it
+
+## Summary line
+
+```
+Processed <total> projects: OK <n>, NOK <n>, SKIP <n>. Total time <duration>.
+```
 
 ## Build (local)
 
-Run the provided script (user-run only). It builds a release binary and writes it to this skill’s `scripts/` directory as an executable (`0755`).
+Run the provided script (user-run only). It builds a release binary and writes it to this skill's `scripts/` directory as an executable (`0755`).
 
 ```bash
 cd "/path/to/skills/git/repo-batch-refresh"

@@ -18,7 +18,7 @@ struct Args {
     #[arg(value_name = "ROOT_DIR")]
     root_dir: PathBuf,
 
-    /// Print additional debug logs (green, no extra formatting besides prefix).
+    /// Print additional debug information: branch details per repo and NOK error blocks.
     #[arg(long)]
     debug: bool,
 
@@ -31,6 +31,16 @@ struct Args {
 struct RepoJob {
     root: PathBuf,
     project_full_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct SkipJob {
+    project_full_path: String,
+}
+
+enum JobResult {
+    Ok,
+    Nok,
 }
 
 fn main() -> Result<()> {
@@ -46,21 +56,30 @@ fn main() -> Result<()> {
 
     let started = Instant::now();
 
-    let repos = discover_repos(&root_dir, args.debug)?;
+    let (repos, skipped) = discover_repos(&root_dir)?;
 
-    let total = repos.len();
+    let total = repos.len() + skipped.len();
     let ok = AtomicUsize::new(0);
     let nok = AtomicUsize::new(0);
+    let skip_n = skipped.len();
+
+    // Print skipped repos in deterministic order before parallel processing.
+    for s in &skipped {
+        print_skip(&s.project_full_path);
+    }
 
     repos.par_iter().for_each(|repo| {
         match refresh_one(repo, &args) {
-            Ok(()) => {
+            Ok(JobResult::Ok) => {
                 ok.fetch_add(1, Ordering::Relaxed);
             }
+            Ok(JobResult::Nok) => {
+                nok.fetch_add(1, Ordering::Relaxed);
+            }
             Err(err) => {
-                // refresh_one should already print NOK; this is a safety net.
+                // Safety net for spawn failures; refresh_one normally handles NOK itself.
                 let msg = format!("unexpected error: {:#}", err);
-                print_nok(&repo.project_full_path, &msg, None);
+                print_nok(&repo.project_full_path, &msg, None, args.debug);
                 nok.fetch_add(1, Ordering::Relaxed);
             }
         }
@@ -73,10 +92,11 @@ fn main() -> Result<()> {
     println!(
         "{}",
         format!(
-            "Updated {} projects: OK {}, NOK {}. Total time {}.",
+            "Processed {} projects: OK {}, NOK {}, SKIP {}. Total time {}.",
             total,
             ok_n,
             nok_n,
+            skip_n,
             fmt_duration(elapsed)
         )
         .green()
@@ -85,8 +105,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn discover_repos(root: &Path, debug: bool) -> Result<Vec<RepoJob>> {
+fn discover_repos(root: &Path) -> Result<(Vec<RepoJob>, Vec<SkipJob>)> {
     let mut repos = Vec::new();
+    let mut skipped = Vec::new();
 
     // Find .git directories; treat their parent as repo root.
     // Do not descend into .git directories.
@@ -114,18 +135,14 @@ fn discover_repos(root: &Path, debug: bool) -> Result<Vec<RepoJob>> {
                 continue;
             }
 
-            // Ignore marker.
-            if repo_root.join(".ignore").exists() {
-                if debug {
-                    // Debug lines will be printed at the end by main().
-                }
-                continue;
-            }
-
-            // (no extra ignore-by-name rules)
-
             let project_full_path = gitlab_project_full_path(&repo_root)
                 .unwrap_or_else(|| fallback_display_path(root, &repo_root));
+
+            // Ignore marker: record as skipped instead of silently dropping.
+            if repo_root.join(".ignore").exists() {
+                skipped.push(SkipJob { project_full_path });
+                continue;
+            }
 
             repos.push(RepoJob {
                 root: repo_root,
@@ -138,11 +155,13 @@ fn discover_repos(root: &Path, debug: bool) -> Result<Vec<RepoJob>> {
     repos.sort_by(|a, b| a.root.cmp(&b.root));
     repos.dedup_by(|a, b| a.root == b.root);
 
-    Ok(repos)
+    skipped.sort_by(|a, b| a.project_full_path.cmp(&b.project_full_path));
+
+    Ok((repos, skipped))
 }
 
-fn refresh_one(repo: &RepoJob, args: &Args) -> Result<()> {
-    // Determine default branch (best effort)
+fn refresh_one(repo: &RepoJob, args: &Args) -> Result<JobResult> {
+    // Determine default branch (best effort).
     // If not detectable, fall back to "main".
     let branch = detect_default_branch(&repo.root).unwrap_or_else(|| "main".to_string());
     let current_branch = git_current_branch(&repo.root);
@@ -177,16 +196,21 @@ fn refresh_one(repo: &RepoJob, args: &Args) -> Result<()> {
 
     if output.status.success() {
         print_ok(&repo.project_full_path, debug_suffix.as_deref());
-        return Ok(());
+        return Ok(JobResult::Ok);
     }
 
     let mut combined = String::new();
     combined.push_str(&String::from_utf8_lossy(&output.stdout));
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
 
-    print_nok(&repo.project_full_path, combined.trim(), debug_suffix.as_deref());
+    print_nok(
+        &repo.project_full_path,
+        combined.trim(),
+        debug_suffix.as_deref(),
+        args.debug,
+    );
 
-    Ok(())
+    Ok(JobResult::Nok)
 }
 
 fn git_current_branch(repo_root: &Path) -> Option<String> {
@@ -305,9 +329,15 @@ fn gitlab_project_full_path(repo_root: &Path) -> Option<String> {
     None
 }
 
+// Prefix layout (4 chars wide, then " | "):
+//   "  OK | "   – 2 spaces + OK
+//   " NOK | "   – 1 space  + NOK
+//   "SKIP | "   – SKIP
+// Error-block continuation uses 5 spaces to align under the pipe:
+//   "     | "
+
 fn print_ok(project_path: &str, debug: Option<&str>) {
-    // OK has 1 leading space
-    let mut line = format!(" OK | {}", project_path);
+    let mut line = format!("  OK | {}", project_path);
     if let Some(d) = debug {
         line.push_str(" | ");
         line.push_str(d);
@@ -315,30 +345,35 @@ fn print_ok(project_path: &str, debug: Option<&str>) {
     println!("{}", line.green());
 }
 
-fn print_nok(project_path: &str, err: &str, debug: Option<&str>) {
-    let mut line = format!("NOK | {}", project_path);
+fn print_nok(project_path: &str, err: &str, debug: Option<&str>, verbose: bool) {
+    let mut line = format!(" NOK | {}", project_path);
     if let Some(d) = debug {
         line.push_str(" | ");
         line.push_str(d);
     }
     println!("{}", line.red());
 
-    // Keep delimiter stable for parsing/readability.
-    let delimiter = "----------------------------------------";
-    println!("{}", format!("    | {}", delimiter).red());
+    if verbose {
+        // Keep delimiter stable for parsing/readability.
+        let delimiter = "----------------------------------------";
+        println!("{}", format!("     | {}", delimiter).red());
 
-    // Limit to 10 lines, keep readable.
-    let mut lines = err
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(10)
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        lines.push("(no error output)");
-    }
-    for line in lines {
-        println!("{}", format!("    | {}", line).red());
-    }
+        let mut lines = err
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .take(10)
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            lines.push("(no error output)");
+        }
+        for line in lines {
+            println!("{}", format!("     | {}", line).red());
+        }
 
-    println!("{}", format!("    | {}", delimiter).red());
+        println!("{}", format!("     | {}", delimiter).red());
+    }
+}
+
+fn print_skip(project_path: &str) {
+    println!("{}", format!("SKIP | {}", project_path).yellow());
 }
