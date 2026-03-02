@@ -13,6 +13,32 @@
 
 ## 工作流程
 
+### 0. 执行模式（默认）
+- 默认将**整条处理流程**委托给一个 `spark` 子智能体执行（`sessions_spawn`）。
+- 建议参数：
+  - `mode`: `run`
+  - `model`: `openai-codex/gpt-5.3-codex-spark`
+  - `cleanup`: `delete`
+- 主会话职责：
+  1. 接收用户 URL 与目标要求
+  2. 启动 spark 子智能体并下发本技能流程约束
+  3. 接收子智能体结果后向 Buck 汇报
+- 例外：若子智能体失败/超时，再由主会话接管同流程兜底执行。
+
+#### sessions_spawn 模板（可直接复用）
+```text
+请按 skill「obsidian/reading-web-article」完整流程处理以下任务，并只返回执行结果摘要：
+- 用户原始请求：<原始请求文本>
+- 目标 URL：<URL>
+- 目标目录：~/Dropbox/ObsidianLibrary/OpenClaw/reading/
+- 必须执行：README 规则检查、URL 规范化、查重、headless 浏览器抓取、frontmatter、命名、写入、完成汇报
+- 若命中重复：返回“已存在 + 文件路径”，不要重复写入
+- 若遇登录/订阅墙：返回“无法抓取 + 原因”，不要伪造内容
+```
+
+推荐调用：
+- `sessions_spawn(mode="run", model="openai-codex/gpt-5.3-codex-spark", cleanup="delete", task=<上述模板填充后文本>)`
+
 ### 1. 预处理
 1. **读取 README 确认规则**：
    - 执行前先读 `~/Dropbox/ObsidianLibrary/OpenClaw/README.md`
@@ -180,7 +206,7 @@ author: <作者名>  # 能提取则提取，不能则留空或省略此行
 ### 执行步骤
 1. 读取 `README.md` 确认规则 ✓
 2. 解析 URL → 域名 `x.com`
-3. web_fetch 抓取文章
+3. 使用 headless 浏览器抓取文章
 4. 识别语言：英文
 5. 生成要点总结 + 全文翻译
 6. 提取 tags：`Reading/X`, `AI/趋势`, `AI/转型`
