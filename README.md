@@ -1,20 +1,30 @@
-# Skills - 工具集目录
+# Skills - Shared Skill Pool
 
-自定义脚本和工具集，按用途分类存放。
+Shared, git-managed skill repository used by multiple agents.
 
-## 目录结构
+## Directory Layout
 
-### openclaw/
-OpenClaw 运维工具集。
+- `openclaw/`
+  - `openclaw-config-backups-archive/`
+    - `SKILL.md`
+    - `scripts/archive_openclaw_backups.zsh`
+- `obsidian/`
+  - `obsidian-reading-ingest/`
+- `obsidian-skills/`
+- `git/`
 
-**Scripts:**
-- `config-file-archive.sh` - 清理并归档配置备份文件（`openclaw.json.bak*`）
+## Recent Changes (synced)
 
----
+- Replaced legacy `config-file-archive.sh/.md` with a structured skill package:
+  - `openclaw/openclaw-config-backups-archive`
+- Removed old standalone files from `openclaw/` (sent to Trash).
+- `archive_openclaw_backups.zsh` now supports both Linux and macOS command differences.
+- Trash handling now uses CLI backends (`trash` -> `gio trash` -> `trash-put`) instead of direct file moves to Trash paths.
+- Added/kept `obsidian/obsidian-reading-ingest` as the new reading-ingest workflow skill.
 
-## 约定
+## Conventions
 
-- **Shell:** 优先使用 zsh（macOS 默认），shebang 使用 `#!/usr/bin/env zsh`（可移植性）
-- **时间格式:** 统一使用 `YYYYMMDD-HHMMSS`（符合 OpenClaw 归档约定）
-- **目录结构:** 按用途分类（如 `openclaw/`、`data/`、`utils/` 等）
-- **文档:** 每个脚本可附带同名 `.md` 文件说明细节
+- Prefer zsh for shell scripts (`#!/usr/bin/env zsh`).
+- Use timestamp format `YYYYMMDD-HHMMSS` for OpenClaw backup archive names.
+- Keep skill folders self-contained (`SKILL.md`, optional `scripts/`, `references/`, `assets/`).
+- Prefer one canonical skill per function; remove deprecated duplicates after migration.
