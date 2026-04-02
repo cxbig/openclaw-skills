@@ -1,7 +1,6 @@
 ---
-name: repo-batch-refresh
-version: "1.1.0"
-description: Batch-refresh a large set of local git repositories under a given root directory. Use when you need to fast-forward update many repos safely (without disrupting the current worktree), with concurrency via --batch and optional --debug output. Repos with a .ignore marker are reported as SKIP.
+name: git-repo-batch-refresh
+description: Refresh many local Git repositories under a root directory with safe fast-forward updates, parallel workers, and optional debug output. Use when the user asks to batch update/sync/pull many repos at once while preserving each repo worktree; repos containing a `.ignore` marker are reported as SKIP.
 ---
 
 # git-repo-batch-refresh
