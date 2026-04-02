@@ -5,7 +5,7 @@ description: Archive and clean OpenClaw backup config files under ~/.openclaw. U
 
 # openclaw-config-backups-archive
 
-Use bundled script `scripts/archive_openclaw_backups.zsh`.
+Use bundled script `scripts/archive_openclaw_backups.zsh` (Linux + macOS compatible).
 
 ## What it does
 - Ensure archive directory exists: `~/.openclaw/.archived`.
@@ -22,13 +22,15 @@ Use bundled script `scripts/archive_openclaw_backups.zsh`.
 - Collision handling for canonical names:
   - increment timestamp by +1 second until no conflict
 - Trash policy:
-  - files in `~/.openclaw/.archived` with `mtime > 30 days` are moved to `~/.Trash`
+  - files in `~/.openclaw/.archived` with `mtime > 30 days` are sent to Trash via CLI backend (not direct `mv`)
+  - backend priority: `trash` -> `gio trash` -> `trash-put`
+  - if no backend exists: apply mode fails with an explicit error; dry-run still reports candidates
 
 ## Commands
 - Dry run:
-  - `zsh ~/OpenClawWorkspaces/skills/openclaw/config-backup-archive/scripts/archive_openclaw_backups.zsh --dry-run`
+  - `zsh /home/cxbig/Workspaces/skills/openclaw/openclaw-config-backups-archive/scripts/archive_openclaw_backups.zsh --dry-run`
 - Apply:
-  - `zsh ~/OpenClawWorkspaces/skills/openclaw/config-backup-archive/scripts/archive_openclaw_backups.zsh --apply`
+  - `zsh /home/cxbig/Workspaces/skills/openclaw/openclaw-config-backups-archive/scripts/archive_openclaw_backups.zsh --apply`
 
 ## Notes
 - Moving to Trash is non-destructive compared with direct deletion.

@@ -3,7 +3,7 @@ set -euo pipefail
 
 OPENCLAW_DIR="$HOME/.openclaw"
 ARCHIVE_DIR="$OPENCLAW_DIR/.archived"
-TRASH_DIR="$HOME/.Trash"
+OS_NAME="$(uname -s)"
 DRY_RUN=1
 
 typeset -A RESERVED_DESTS
@@ -18,7 +18,6 @@ else
 fi
 
 mkdir -p "$ARCHIVE_DIR"
-mkdir -p "$TRASH_DIR"
 
 is_bak_candidate() {
   local name="$1"
@@ -28,28 +27,54 @@ is_bak_candidate() {
 
 is_new_canonical_name() {
   local name="$1"
-  [[ "$name" =~ '^openclaw\.bak\.[0-9]{8}-[0-9]{6}\.json$' ]]
+  [[ "$name" =~ ^openclaw\.bak\.[0-9]{8}-[0-9]{6}\.json$ ]]
 }
 
 is_old_no_bak_canonical_name() {
   local name="$1"
-  [[ "$name" =~ '^openclaw\.[0-9]{8}-[0-9]{6}\.json$' ]]
+  [[ "$name" =~ ^openclaw\.[0-9]{8}-[0-9]{6}\.json$ ]]
 }
 
 canonical_epoch_for_file() {
-  local path="$1"
-  local ts
+  local file="$1"
+  local ts=""
 
-  ts=$(/usr/bin/stat -f '%c' "$path" 2>/dev/null || true)
-  if [[ -z "$ts" || ! "$ts" =~ '^[0-9]+$' ]]; then
-    ts=$(/usr/bin/stat -f '%m' "$path")
+  # Try GNU stat first (Linux), then BSD stat (macOS). Avoid relying on uname only.
+  ts=$(stat -c '%Z' "$file" 2>/dev/null || true)
+  if [[ -z "$ts" || "$ts" != <-> ]]; then
+    ts=$(stat -c '%Y' "$file" 2>/dev/null || true)
   fi
+  if [[ -z "$ts" || "$ts" != <-> ]]; then
+    ts=$(stat -f '%c' "$file" 2>/dev/null || true)
+  fi
+  if [[ -z "$ts" || "$ts" != <-> ]]; then
+    ts=$(stat -f '%m' "$file" 2>/dev/null || true)
+  fi
+
+  if [[ -z "$ts" || "$ts" != <-> ]]; then
+    echo "Failed to read timestamp for: $file" >&2
+    return 1
+  fi
+
   print -r -- "$ts"
 }
 
 fmt_ts() {
   local epoch="$1"
-  /bin/date -r "$epoch" '+%Y%m%d-%H%M%S'
+  if [[ "$OS_NAME" == "Darwin" ]]; then
+    date -r "$epoch" '+%Y%m%d-%H%M%S'
+  else
+    date -d "@$epoch" '+%Y%m%d-%H%M%S'
+  fi
+}
+
+parse_ts_to_epoch() {
+  local ts="$1"
+  if [[ "$OS_NAME" == "Darwin" ]]; then
+    date -j -f '%Y%m%d-%H%M%S' "$ts" '+%s'
+  else
+    date -d "${ts:0:8} ${ts:9:2}:${ts:11:2}:${ts:13:2}" '+%s'
+  fi
 }
 
 is_reserved() {
@@ -88,32 +113,62 @@ unique_archive_dest_from_ts() {
   fi
 
   # if direct target collides, continue by +1 second
-  epoch=$(/bin/date -j -f '%Y%m%d-%H%M%S' "$ts" '+%s')
+  epoch=$(parse_ts_to_epoch "$ts")
   epoch=$((epoch + 1))
   unique_archive_dest_from_epoch "$epoch"
 }
 
-unique_trash_dest() {
-  local base="$1"
-  local cand="$TRASH_DIR/$base"
-  local stem ext i
+detect_trash_backend() {
+  if command -v trash >/dev/null 2>&1; then
+    print -r -- "trash"
+    return 0
+  fi
+  if command -v gio >/dev/null 2>&1; then
+    print -r -- "gio"
+    return 0
+  fi
+  if command -v trash-put >/dev/null 2>&1; then
+    print -r -- "trash-put"
+    return 0
+  fi
+  return 1
+}
 
-  if [[ ! -e "$cand" ]] && ! is_reserved "$cand"; then
-    print -r -- "$cand"
+run_trash() {
+  local src="$1" note="${2:-}"
+  local backend="${TRASH_BACKEND:-}"
+
+  if [[ -n "$note" ]]; then
+    echo "[TRASH] $src ($note)"
+  else
+    echo "[TRASH] $src"
+  fi
+
+  if (( DRY_RUN == 1 )); then
+    echo "        backend: ${backend:-<none>}"
     return 0
   fi
 
-  stem="${base%.*}"
-  ext="${base##*.}"
-  i=1
-  while true; do
-    cand="$TRASH_DIR/${stem}.${i}.${ext}"
-    if [[ ! -e "$cand" ]] && ! is_reserved "$cand"; then
-      print -r -- "$cand"
-      return 0
-    fi
-    ((i++))
-  done
+  if [[ -z "$backend" ]]; then
+    echo "No trash CLI backend available (expected one of: trash, gio, trash-put)." >&2
+    return 1
+  fi
+
+  case "$backend" in
+    trash)
+      trash -- "$src"
+      ;;
+    gio)
+      gio trash "$src"
+      ;;
+    trash-put)
+      trash-put "$src"
+      ;;
+    *)
+      echo "Unsupported trash backend: $backend" >&2
+      return 1
+      ;;
+  esac
 }
 
 run_move() {
@@ -129,11 +184,16 @@ run_move() {
   fi
 }
 
+TRASH_BACKEND=""
+if TRASH_BACKEND=$(detect_trash_backend); then
+  :
+else
+  TRASH_BACKEND=""
+fi
+
 # 1) Trash archived files older than 30 days by mtime
 while IFS= read -r -d '' f; do
-  dest=$(unique_trash_dest "${f:t}")
-  reserve_dest "$dest"
-  run_move "TRASH" "$f" "$dest" "mtime>30d"
+  run_trash "$f" "mtime>30d"
 done < <(find "$ARCHIVE_DIR" -type f -mtime +30 -print0)
 
 # 2) Root + archive: files starting with openclaw and containing bak
