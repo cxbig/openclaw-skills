@@ -9,7 +9,7 @@ Process exactly one URL per turn and write to `obsidian/reading` with determinis
 
 ## Global Constraints (must keep)
 
-- When writing into Obsidian Vault, prioritize skills under `~/Workspaces/skills/obsidian-skills/skills/`.
+- When writing into Obsidian Vault, prioritize skills under `obsidian-skills/skills/` in this shared skills repository.
 - For article reading/fetching, use Browser tool as the primary path with local headed Chrome and `openclaw` profile.
 - Do not use `web_search` / `web_fetch` as the main reading path for this workflow.
 

@@ -28,9 +28,9 @@ Use bundled script `scripts/archive_openclaw_backups.zsh` (Linux + macOS compati
 
 ## Commands
 - Dry run:
-  - `zsh /home/cxbig/Workspaces/skills/openclaw/openclaw-config-backups-archive/scripts/archive_openclaw_backups.zsh --dry-run`
+  - `zsh ./scripts/archive_openclaw_backups.zsh --dry-run` (from this skill directory)
 - Apply:
-  - `zsh /home/cxbig/Workspaces/skills/openclaw/openclaw-config-backups-archive/scripts/archive_openclaw_backups.zsh --apply`
+  - `zsh ./scripts/archive_openclaw_backups.zsh --apply` (from this skill directory)
 
 ## Notes
 - Moving to Trash is non-destructive compared with direct deletion.
